@@ -1,0 +1,389 @@
+{
+	"$schema": "https://xyops.com/schemas/xyops.json",
+	"name": "xyOps Network",
+	"version": "1.0.0",
+	"description": "Network diagnostic and analysis tools for xyOps workflows",
+	"author": "xyOps",
+	"license": "MIT",
+	"homepage": "https://github.com/talder/xyOps-network",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/talder/xyOps-network.git"
+	},
+	"keywords": [
+		"network",
+		"ping",
+		"dns",
+		"traceroute",
+		"port-scanner",
+		"ssl",
+		"whois",
+		"http",
+		"jwt",
+		"ip-address"
+	],
+	"engines": {
+		"xyops": ">=1.0.0"
+	},
+	"main": "network.ps1",
+	"params": [
+		{
+			"id": "tool",
+			"title": "Network Tool",
+			"type": "select",
+			"data": {
+				"tools": [
+					{
+						"id": "ipAddressTools",
+						"title": "IP Address Tools",
+						"description": "Validate, convert, and analyze IP addresses.",
+						"fields": [
+							{
+								"id": "ipMode",
+								"title": "Mode",
+								"type": "select",
+								"value": "Validate & Analyze [validate], IP to Decimal [toDecimal], Decimal to IP [fromDecimal], IP to Binary [toBinary], Subnet Calculator [subnet]",
+								"caption": "Select the operation to perform."
+							},
+							{
+								"id": "ipSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the IP."
+							},
+							{
+								"id": "ipInput",
+								"title": "IP Address / Value",
+								"type": "text",
+								"value": "",
+								"caption": "IP address or decimal value. For subnet mode, use CIDR (e.g., 192.168.1.0/24)."
+							},
+							{
+								"id": "ipDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to the data field. (Used when Data Source is 'input data')"
+							}
+						]
+					},
+					{
+						"id": "jwtDecoder",
+						"title": "JWT Decoder",
+						"description": "Decode and inspect JWT tokens (header, payload, expiration).",
+						"fields": [
+							{
+								"id": "jwtSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the JWT."
+							},
+							{
+								"id": "jwtInput",
+								"title": "JWT Token",
+								"type": "textarea",
+								"value": "",
+								"caption": "JWT token to decode."
+							},
+							{
+								"id": "jwtDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to the data field. (Used when Data Source is 'input data')"
+							}
+						]
+					},
+					{
+						"id": "pingTest",
+						"title": "Ping Test",
+						"description": "Ping a host and measure latency with statistics.",
+						"fields": [
+							{
+								"id": "pingSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the host."
+							},
+							{
+								"id": "pingHost",
+								"title": "Host",
+								"type": "text",
+								"value": "",
+								"caption": "Hostname or IP address to ping."
+							},
+							{
+								"id": "pingDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to data field (when source is 'input')."
+							},
+							{
+								"id": "pingCount",
+								"title": "Ping Count",
+								"type": "text",
+								"value": "4",
+								"variant": "number",
+								"caption": "Number of pings to send (1-10)."
+							},
+							{
+								"id": "pingTimeout",
+								"title": "Timeout (ms)",
+								"type": "text",
+								"value": "1000",
+								"variant": "number",
+								"caption": "Timeout per ping in milliseconds (100-30000)."
+							}
+						]
+					},
+					{
+						"id": "dnsLookup",
+						"title": "DNS Lookup",
+						"description": "Resolve DNS records including A, AAAA, MX, TXT, CNAME, NS, SOA, and PTR (reverse).",
+						"fields": [
+							{
+								"id": "dnsSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the query."
+							},
+							{
+								"id": "dnsQuery",
+								"title": "Domain / IP",
+								"type": "text",
+								"value": "",
+								"caption": "Domain name or IP address (for PTR/reverse lookup)."
+							},
+							{
+								"id": "dnsDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to data field (when source is 'input')."
+							},
+							{
+								"id": "dnsRecordType",
+								"title": "Record Type",
+								"type": "select",
+								"value": "A Record (IPv4) [A], AAAA Record (IPv6) [AAAA], MX Record (Mail) [MX], TXT Record [TXT], CNAME Record [CNAME], NS Record (Name Server) [NS], SOA Record [SOA], PTR Record (Reverse DNS) [PTR]",
+								"caption": "Type of DNS record to query."
+							},
+							{
+								"id": "dnsServer",
+								"title": "DNS Server (optional)",
+								"type": "text",
+								"value": "",
+								"caption": "Custom DNS server (e.g., 8.8.8.8, 1.1.1.1). Leave empty for system DNS."
+							}
+						]
+					},
+					{
+						"id": "traceroute",
+						"title": "Traceroute",
+						"description": "Trace the network path to a host, showing each hop.",
+						"fields": [
+							{
+								"id": "traceSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the host."
+							},
+							{
+								"id": "traceHost",
+								"title": "Host",
+								"type": "text",
+								"value": "",
+								"caption": "Hostname or IP address to trace."
+							},
+							{
+								"id": "traceDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to data field (when source is 'input')."
+							},
+							{
+								"id": "traceMaxHops",
+								"title": "Max Hops",
+								"type": "text",
+								"value": "30",
+								"variant": "number",
+								"caption": "Maximum number of hops (1-64)."
+							},
+							{
+								"id": "traceTimeout",
+								"title": "Timeout (ms)",
+								"type": "text",
+								"value": "3000",
+								"variant": "number",
+								"caption": "Timeout per hop in milliseconds."
+							},
+							{
+								"id": "traceResolveNames",
+								"title": "Resolve Hostnames",
+								"type": "checkbox",
+								"value": true,
+								"caption": "Resolve IP addresses to hostnames."
+							}
+						]
+					},
+					{
+						"id": "portScanner",
+						"title": "Port Scanner",
+						"description": "Check if specific ports are open on a host.",
+						"fields": [
+							{
+								"id": "portSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the host."
+							},
+							{
+								"id": "portHost",
+								"title": "Host",
+								"type": "text",
+								"value": "",
+								"caption": "Hostname or IP address to scan."
+							},
+							{
+								"id": "portDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to data field (when source is 'input')."
+							},
+							{
+								"id": "portPorts",
+								"title": "Ports",
+								"type": "text",
+								"value": "80,443",
+								"caption": "Comma-separated ports or ranges (e.g., 80,443,8080-8090). Max 100 ports."
+							},
+							{
+								"id": "portTimeout",
+								"title": "Timeout (ms)",
+								"type": "text",
+								"value": "1000",
+								"variant": "number",
+								"caption": "Connection timeout per port in milliseconds."
+							}
+						]
+					},
+					{
+						"id": "httpChecker",
+						"title": "HTTP Status Checker",
+						"description": "Check HTTP status, response time, and headers for a URL.",
+						"fields": [
+							{
+								"id": "httpSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the URL."
+							},
+							{
+								"id": "httpUrl",
+								"title": "URL",
+								"type": "text",
+								"value": "",
+								"caption": "URL to check (https:// added if not specified)."
+							},
+							{
+								"id": "httpDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to data field (when source is 'input')."
+							},
+							{
+								"id": "httpMethod",
+								"title": "HTTP Method",
+								"type": "select",
+								"value": "GET [GET], HEAD [HEAD], POST [POST]",
+								"caption": "HTTP method to use."
+							},
+							{
+								"id": "httpTimeout",
+								"title": "Timeout (seconds)",
+								"type": "text",
+								"value": "10",
+								"variant": "number",
+								"caption": "Request timeout in seconds (1-60)."
+							},
+							{
+								"id": "httpFollowRedirects",
+								"title": "Follow Redirects",
+								"type": "checkbox",
+								"value": true,
+								"caption": "Automatically follow HTTP redirects."
+							}
+						]
+					},
+					{
+						"id": "sslChecker",
+						"title": "SSL Certificate Checker",
+						"description": "Check SSL/TLS certificate details, expiry, and validity.",
+						"fields": [
+							{
+								"id": "sslSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the host."
+							},
+							{
+								"id": "sslHost",
+								"title": "Host",
+								"type": "text",
+								"value": "",
+								"caption": "Hostname or URL (port 443 default, or specify host:port)."
+							},
+							{
+								"id": "sslDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to data field (when source is 'input')."
+							}
+						]
+					},
+					{
+						"id": "whoisLookup",
+						"title": "WHOIS Lookup",
+						"description": "Look up domain registration information via WHOIS.",
+						"fields": [
+							{
+								"id": "whoisSource",
+								"title": "Data Source",
+								"type": "select",
+								"value": "Use text field below [field], Use job input data [input]",
+								"caption": "Choose where to get the domain."
+							},
+							{
+								"id": "whoisDomain",
+								"title": "Domain",
+								"type": "text",
+								"value": "",
+								"caption": "Domain name to look up (e.g., example.com)."
+							},
+							{
+								"id": "whoisDataPath",
+								"title": "Input Data Path",
+								"type": "text",
+								"value": "",
+								"caption": "Dot-notation path to data field (when source is 'input')."
+							}
+						]
+					}
+				]
+			}
+		}
+	]
+}

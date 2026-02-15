@@ -1,0 +1,36 @@
+{
+  "name": "@xyops/network",
+  "version": "1.0.0",
+  "description": "Network diagnostic and analysis tools for xyOps workflows",
+  "main": "network.ps1",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/talder/xyOps-network.git"
+  },
+  "keywords": [
+    "xyops",
+    "network",
+    "ping",
+    "dns",
+    "traceroute",
+    "port-scanner",
+    "ssl",
+    "whois",
+    "http",
+    "jwt",
+    "ip-address",
+    "powershell"
+  ],
+  "author": "xyOps",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/talder/xyOps-network/issues"
+  },
+  "homepage": "https://github.com/talder/xyOps-network#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
