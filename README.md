@@ -1,6 +1,10 @@
-# xyOps Network Plugin
+# xyOps Network diagnostic Plugin
 
 A comprehensive network diagnostic and analysis plugin for xyOps workflows. Provides 9 tools for network testing, DNS resolution, certificate checking, and more.
+
+## Disclaimer
+
+**USE AT YOUR OWN RISK.** This software is provided "as is", without warranty of any kind, express or implied. The author and contributors are not responsible for any damages, data loss, or other issues that may arise from the use of this software. Always test in non-production environments first. By using this plugin, you acknowledge that you have read, understood, and accepted this disclaimer.
 
 ## Tools
 
@@ -20,52 +24,6 @@ A comprehensive network diagnostic and analysis plugin for xyOps workflows. Prov
 
 - PowerShell 7.0 or higher
 - Network access for remote operations
-
-## Installation
-
-```bash
-# Via NPX (recommended for xyOps)
-npx -y github:talder/xyOps-network
-
-# Or clone the repository
-git clone https://github.com/talder/xyOps-network.git
-```
-
-## Usage
-
-### Local Testing
-
-```bash
-# Ping Test
-echo '{"params":{"tool":"pingTest","pingHost":"google.com","pingCount":4}}' | pwsh -NoProfile -File network.ps1
-
-# DNS Lookup
-echo '{"params":{"tool":"dnsLookup","dnsQuery":"google.com","dnsRecordType":"MX"}}' | pwsh -NoProfile -File network.ps1
-
-# Port Scanner
-echo '{"params":{"tool":"portScanner","portHost":"google.com","portPorts":"80,443"}}' | pwsh -NoProfile -File network.ps1
-
-# SSL Certificate Checker
-echo '{"params":{"tool":"sslChecker","sslHost":"github.com"}}' | pwsh -NoProfile -File network.ps1
-
-# WHOIS Lookup
-echo '{"params":{"tool":"whoisLookup","whoisDomain":"github.com"}}' | pwsh -NoProfile -File network.ps1
-
-# HTTP Status Checker
-echo '{"params":{"tool":"httpChecker","httpUrl":"https://github.com"}}' | pwsh -NoProfile -File network.ps1
-
-# IP Address Tools - Validate
-echo '{"params":{"tool":"ipAddressTools","ipMode":"validate","ipInput":"192.168.1.1"}}' | pwsh -NoProfile -File network.ps1
-
-# IP Address Tools - Subnet Calculator
-echo '{"params":{"tool":"ipAddressTools","ipMode":"subnet","ipInput":"192.168.1.0/24"}}' | pwsh -NoProfile -File network.ps1
-
-# JWT Decoder
-echo '{"params":{"tool":"jwtDecoder","jwtInput":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"}}' | pwsh -NoProfile -File network.ps1
-
-# Traceroute
-echo '{"params":{"tool":"traceroute","traceHost":"google.com","traceMaxHops":15}}' | pwsh -NoProfile -File network.ps1
-```
 
 ## Tool Details
 
@@ -87,25 +45,95 @@ echo '{"params":{"tool":"traceroute","traceHost":"google.com","traceMaxHops":15}
 - **Supports**: 16+ TLDs with automatic WHOIS server selection
 - **Fields**: Registrar, creation/expiration dates, name servers, status
 
-## I/O Contract
+## Bucket Data (Input from Previous Jobs)
 
-The plugin follows the standard xyOps event plugin protocol:
+All tools support receiving input data from a previous job's bucket. Set the "Data Source" to "Use job input data" and specify the data path.
 
-**Input** (JSON on STDIN):
+### Bucket JSON Examples
+
+**Ping Test** - expects a host/IP:
 ```json
 {
-  "params": { "tool": "toolName", ...toolParams },
-  "input": { "data": {...} },
-  "cwd": "/working/directory"
+  "params": { "tool": "pingTest", "pingSource": "input", "pingDataPath": "server.ip" },
+  "input": { "data": { "server": { "ip": "192.168.1.1" } } }
 }
 ```
 
-**Output** (JSON lines on STDOUT):
-- Progress: `{ "xy": 1, "progress": 0.5, "status": "..." }`
-- Table: `{ "xy": 1, "table": { "title": "...", "header": [...], "rows": [...] } }`
-- Success: `{ "xy": 1, "code": 0, "data": {...}, "description": "..." }`
-- Error: `{ "xy": 1, "code": 1, "description": "..." }`
+**DNS Lookup** - expects a domain:
+```json
+{
+  "params": { "tool": "dnsLookup", "dnsSource": "input", "dnsDataPath": "domain", "dnsRecordType": "MX" },
+  "input": { "data": { "domain": "example.com" } } }
+}
+```
+
+**HTTP Status Checker** - expects a URL:
+```json
+{
+  "params": { "tool": "httpChecker", "httpSource": "input", "httpDataPath": "endpoint.url" },
+  "input": { "data": { "endpoint": { "url": "https://api.example.com/health" } } }
+}
+```
+
+**SSL Certificate Checker** - expects a hostname:
+```json
+{
+  "params": { "tool": "sslChecker", "sslSource": "input", "sslDataPath": "host" },
+  "input": { "data": { "host": "github.com" } }
+}
+```
+
+**Port Scanner** - expects a host:
+```json
+{
+  "params": { "tool": "portScanner", "portSource": "input", "portDataPath": "target", "portPorts": "22,80,443" },
+  "input": { "data": { "target": "192.168.1.100" } }
+}
+```
+
+**JWT Decoder** - expects a token:
+```json
+{
+  "params": { "tool": "jwtDecoder", "jwtSource": "input", "jwtDataPath": "auth.token" },
+  "input": { "data": { "auth": { "token": "eyJhbGciOiJIUzI1NiIs..." } } }
+}
+```
+
+**IP Address Tools** - expects an IP or CIDR:
+```json
+{
+  "params": { "tool": "ipAddressTools", "ipSource": "input", "ipDataPath": "network.ip", "ipMode": "validate" },
+  "input": { "data": { "network": { "ip": "10.0.0.1" } } }
+}
+```
+
+**Traceroute** - expects a host:
+```json
+{
+  "params": { "tool": "traceroute", "traceSource": "input", "traceDataPath": "destination" },
+  "input": { "data": { "destination": "google.com" } }
+}
+```
+
+**WHOIS Lookup** - expects a domain:
+```json
+{
+  "params": { "tool": "whoisLookup", "whoisSource": "input", "whoisDataPath": "site.domain" },
+  "input": { "data": { "site": { "domain": "github.com" } } }
+}
+```
+
+### Data Path Notation
+
+The data path uses dot-notation to navigate nested objects:
+- `host` → `data.host`
+- `server.ip` → `data.server.ip`
+- `config.targets.primary` → `data.config.targets.primary`
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+## Copyright
+
+(2026) Tim Alderweireldt

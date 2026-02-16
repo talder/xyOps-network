@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8E2DE2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4A00E0;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg2)" rx="80"/>
+  <text x="256" y="100" font-family="Arial, sans-serif" font-size="88" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Network</text>
+  <polygon points="256,120 360,180 360,300 256,360 152,300 152,180" fill="white" opacity="0.15" stroke="white" stroke-width="3"/>
+  <polygon points="256,140 340,190 340,290 256,340 172,290 172,190" fill="white" opacity="0.9"/>
+  
+  <!-- Font Awesome network-wired icon (viewBox 0 0 640 512) centered in hexagon -->
+  <!-- Hexagon center is at (256, 240), icon scaled to 0.22 for better fit -->
+  <g transform="translate(185, 185) scale(0.22)">
+    <path fill="#6B20B0" d="M256 64H384v64H256V64zM240 0c-26.5 0-48 21.5-48 48v96c0 26.5 21.5 48 48 48h48v32H32c-17.7 0-32 14.3-32 32s14.3 32 32 32h96v32H80c-26.5 0-48 21.5-48 48v96c0 26.5 21.5 48 48 48H240c26.5 0 48-21.5 48-48V368c0-26.5-21.5-48-48-48H192V288H448v32H400c-26.5 0-48 21.5-48 48v96c0 26.5 21.5 48 48 48H560c26.5 0 48-21.5 48-48V368c0-26.5-21.5-48-48-48H512V288h96c17.7 0 32-14.3 32-32s-14.3-32-32-32H352V192h48c26.5 0 48-21.5 48-48V48c0-26.5-21.5-48-48-48H240zM96 448V384H224v64H96zm320-64H544v64H416V384z"/>
+  </g>
+  
+  <text x="256" y="440" font-family="Arial, sans-serif" font-size="88" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Diagnostics</text>
+</svg>

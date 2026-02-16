@@ -1,388 +1,388 @@
 {
-	"$schema": "https://xyops.com/schemas/xyops.json",
-	"name": "xyOps Network",
-	"version": "1.0.0",
-	"description": "Network diagnostic and analysis tools for xyOps workflows",
-	"author": "xyOps",
-	"license": "MIT",
-	"homepage": "https://github.com/talder/xyOps-network",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/talder/xyOps-network.git"
-	},
-	"keywords": [
-		"network",
-		"ping",
-		"dns",
-		"traceroute",
-		"port-scanner",
-		"ssl",
-		"whois",
-		"http",
-		"jwt",
-		"ip-address"
-	],
-	"engines": {
-		"xyops": ">=1.0.0"
-	},
-	"main": "network.ps1",
-	"params": [
+	"type": "xypdf",
+	"description": "xyOps Portable Data Object",
+	"version": "1.0",
+	"xyops": "0.9.68",
+	"items": [
 		{
-			"id": "tool",
-			"title": "Network Tool",
-			"type": "select",
+			"type": "plugin",
 			"data": {
-				"tools": [
+				"id": "net1network0001",
+				"title": "Network Diagnostic",
+				"enabled": true,
+				"type": "event",
+				"command": "pwsh",
+				"script": "#requires -Version 7.0\n# Copyright (c) 2026 Tim Alderweireldt. All rights reserved.\n<#!\nxyOps Network Event Plugin (PowerShell 7)\nA collection of network diagnostic and analysis tools for xyOps including:\n- IP Address Tools (validate, convert, subnet calculator)\n- JWT Decoder\n- Ping Test\n- DNS Lookup\n- Traceroute\n- Port Scanner\n- HTTP Status Checker\n- SSL Certificate Checker\n- WHOIS Lookup\n\nI/O contract:\n- Read one JSON object from STDIN (job), write progress/messages as JSON lines of the\n  form: { \"xy\": 1, ... } to STDOUT.\n- On success, emit: { \"xy\": 1, \"code\": 0, \"data\": <result>, \"description\": \"...\" }\n- On error, emit:   { \"xy\": 1, \"code\": <nonzero>, \"description\": \"...\" } and exit 1.\n\nTest locally:\n  pwsh -NoProfile -ExecutionPolicy Bypass -File .\\network.ps1 < job.json\n#>\n\nSet-StrictMode -Version Latest\n$ErrorActionPreference = 'Stop'\n\nfunction Write-XY {\n  param([hashtable]$Object)\n  $payload = [ordered]@{ xy = 1 }\n  foreach ($k in $Object.Keys) { $payload[$k] = $Object[$k] }\n  [Console]::Out.WriteLine(($payload | ConvertTo-Json -Depth 20 -Compress))\n  [Console]::Out.Flush()\n}\n\nfunction Write-XYProgress {\n  param([double]$Value, [string]$Status)\n  $o = @{ progress = [math]::Round($Value, 4) }\n  if ($Status) { $o.status = $Status }\n  Write-XY $o\n}\n\nfunction Write-XYSuccess {\n  param($Data, [string]$Description)\n  $o = @{ code = 0; data = $Data }\n  if ($Description) { $o.description = $Description }\n  Write-XY $o\n}\n\nfunction Write-XYError {\n  param([int]$Code, [string]$Description)\n  Write-XY @{ code = $Code; description = $Description }\n}\n\nfunction Read-JobFromStdin {\n  $raw = [Console]::In.ReadToEnd()\n  if ([string]::IsNullOrWhiteSpace($raw)) { throw 'No job JSON received on STDIN' }\n  return $raw | ConvertFrom-Json -ErrorAction Stop\n}\n\nfunction Get-NestedValue {\n  param($Object, [string]$Path)\n  if (-not $Path -or ($Path.Trim() -eq '')) { return $Object }\n  $cur = $Object\n  foreach ($part in $Path.Split('.')) {\n    if ($null -eq $cur) { return $null }\n    if ($cur -is [System.Collections.IDictionary]) {\n      if (-not $cur.Contains($part)) { return $null }\n      $cur = $cur[$part]\n    }\n    else {\n      $cur = $cur.PSObject.Properties[$part].Value\n    }\n  }\n  return $cur\n}\n\n# Safe parameter getter - returns default if property doesn't exist\nfunction Get-Param {\n  param($Params, [string]$Name, $Default = $null)\n  if ($Params.PSObject.Properties.Name -contains $Name) { return $Params.$Name }\n  return $Default\n}\n\n# ------------------------- IP Address Tools -------------------------\nfunction Invoke-IPAddressTools {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  $mode = ($Params.ipMode ?? 'validate')\n  $source = ($Params.ipSource ?? 'field')\n  $ipInput = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = ($Params.ipDataPath ?? '')\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $ipInput = [string]$val\n  } else { $ipInput = ($Params.ipInput ?? '') }\n  \n  if (-not $ipInput) { throw 'No IP address provided' }\n  \n  Write-XYProgress 0.5 'Processing IP address...'\n  \n  $ipInput = $ipInput.Trim()\n  $rows = @()\n  $result = @{ tool='IP Address Tools'; mode=$mode; input=$ipInput }\n  \n  switch ($mode) {\n    'validate' {\n      $ipv4Valid = $false; $ipv6Valid = $false; $type = 'Invalid'\n      try {\n        $ip = [System.Net.IPAddress]::Parse($ipInput)\n        if ($ip.AddressFamily -eq 'InterNetwork') { $ipv4Valid = $true; $type = 'IPv4' }\n        elseif ($ip.AddressFamily -eq 'InterNetworkV6') { $ipv6Valid = $true; $type = 'IPv6' }\n      } catch {}\n      $isPrivate = $false; $isLoopback = $false; $class = 'N/A'\n      if ($ipv4Valid) {\n        $octets = $ipInput -split '\\.' | ForEach-Object { [int]$_ }\n        if ($octets[0] -eq 10) { $isPrivate = $true }\n        elseif ($octets[0] -eq 172 -and $octets[1] -ge 16 -and $octets[1] -le 31) { $isPrivate = $true }\n        elseif ($octets[0] -eq 192 -and $octets[1] -eq 168) { $isPrivate = $true }\n        elseif ($octets[0] -eq 127) { $isLoopback = $true }\n        if ($octets[0] -le 127) { $class = 'A' }\n        elseif ($octets[0] -le 191) { $class = 'B' }\n        elseif ($octets[0] -le 223) { $class = 'C' }\n        elseif ($octets[0] -le 239) { $class = 'D (Multicast)' }\n        else { $class = 'E (Reserved)' }\n      }\n      $rows = @(@('IP Address', $ipInput), @('Valid', $(if ($ipv4Valid -or $ipv6Valid) { '✓ Yes' } else { '✗ No' })), @('Type', $type), @('Class', $class), @('Private', $(if ($isPrivate) { 'Yes' } else { 'No' })), @('Loopback', $(if ($isLoopback) { 'Yes' } else { 'No' })))\n      $result.valid = ($ipv4Valid -or $ipv6Valid); $result.type = $type; $result.class = $class; $result.isPrivate = $isPrivate; $result.isLoopback = $isLoopback\n    }\n    'toDecimal' {\n      $octets = $ipInput -split '\\.' | ForEach-Object { [int]$_ }\n      if ($octets.Count -ne 4) { throw 'Invalid IPv4 address' }\n      $decimal = ([long]$octets[0] * 16777216) + ([long]$octets[1] * 65536) + ([long]$octets[2] * 256) + [long]$octets[3]\n      $rows = @(@('IPv4 Address', $ipInput), @('Decimal', $decimal))\n      $result.decimal = $decimal\n    }\n    'fromDecimal' {\n      $dec = [long]$ipInput\n      $o1 = [Math]::Floor($dec / 16777216) % 256; $o2 = [Math]::Floor($dec / 65536) % 256\n      $o3 = [Math]::Floor($dec / 256) % 256; $o4 = $dec % 256\n      $ipv4 = \"$o1.$o2.$o3.$o4\"\n      $rows = @(@('Decimal', $dec), @('IPv4 Address', $ipv4))\n      $result.ipv4 = $ipv4\n    }\n    'toBinary' {\n      $octets = $ipInput -split '\\.' | ForEach-Object { [int]$_ }\n      if ($octets.Count -ne 4) { throw 'Invalid IPv4 address' }\n      $binary = ($octets | ForEach-Object { [Convert]::ToString($_, 2).PadLeft(8, '0') }) -join '.'\n      $rows = @(@('IPv4 Address', $ipInput), @('Binary', $binary))\n      $result.binary = $binary\n    }\n    'subnet' {\n      if ($ipInput -notmatch '/') { throw 'Please provide IP in CIDR notation (e.g., 192.168.1.0/24)' }\n      $parts = $ipInput -split '/'; $ip = $parts[0]; $cidr = [int]$parts[1]\n      $octets = $ip -split '\\.' | ForEach-Object { [int]$_ }\n      $mask = ([Math]::Pow(2, 32) - [Math]::Pow(2, 32 - $cidr))\n      $m1 = [Math]::Floor($mask / 16777216) % 256; $m2 = [Math]::Floor($mask / 65536) % 256\n      $m3 = [Math]::Floor($mask / 256) % 256; $m4 = $mask % 256\n      $subnetMask = \"$m1.$m2.$m3.$m4\"\n      $networkAddr = \"$($octets[0] -band $m1).$($octets[1] -band $m2).$($octets[2] -band $m3).$($octets[3] -band $m4)\"\n      $hostCount = [Math]::Pow(2, 32 - $cidr) - 2\n      $rows = @(@('CIDR', $ipInput), @('Subnet Mask', $subnetMask), @('Network Address', $networkAddr), @('Usable Hosts', $(if ($hostCount -gt 0) { $hostCount } else { 0 })))\n      $result.subnetMask = $subnetMask; $result.networkAddress = $networkAddr; $result.usableHosts = $hostCount\n    }\n  }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  $modeNames = @{ validate='Validate'; toDecimal='IP to Decimal'; fromDecimal='Decimal to IP'; toBinary='IP to Binary'; subnet='Subnet Calculator' }\n  Write-XY @{ table = @{ title=\"IP Address - $($modeNames[$mode])\"; header=@('Property','Value'); rows=$rows; caption='IP address processed' } }\n  [pscustomobject]$result\n}\n\n# ------------------------- JWT Decoder -------------------------\nfunction Invoke-JWTDecoder {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  $source = ($Params.jwtSource ?? 'field')\n  $token = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = ($Params.jwtDataPath ?? '')\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $token = [string]$val\n  } else { $token = ($Params.jwtInput ?? '') }\n  \n  if (-not $token) { throw 'No JWT token provided' }\n  \n  Write-XYProgress 0.5 'Decoding JWT...'\n  \n  $token = $token.Trim()\n  $parts = $token -split '\\.'\n  if ($parts.Count -ne 3) { throw 'Invalid JWT format (expected 3 parts separated by dots)' }\n  \n  # Base64URL decode helper\n  $decodeBase64Url = {\n    param($s)\n    $s = $s.Replace('-', '+').Replace('_', '/')\n    switch ($s.Length % 4) { 2 { $s += '==' } 3 { $s += '=' } }\n    [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s))\n  }\n  \n  $headerJson = & $decodeBase64Url $parts[0]\n  $payloadJson = & $decodeBase64Url $parts[1]\n  $header = $headerJson | ConvertFrom-Json\n  $payload = $payloadJson | ConvertFrom-Json\n  \n  # Helper to safely get property from PSCustomObject\n  $getProp = { param($obj, $name, $default)\n    if ($null -ne $obj.PSObject -and $obj.PSObject.Properties.Name -contains $name) {\n      $val = $obj.$name\n      if ($null -ne $val) { return $val }\n    }\n    return $default\n  }\n  \n  # Extract common claims\n  $alg = & $getProp $header 'alg' 'N/A'\n  $typ = & $getProp $header 'typ' 'N/A'\n  $iss = & $getProp $payload 'iss' 'N/A'\n  $sub = & $getProp $payload 'sub' 'N/A'\n  $audVal = & $getProp $payload 'aud' $null\n  $aud = if ($null -ne $audVal) { if ($audVal -is [array]) { $audVal -join ', ' } else { $audVal } } else { 'N/A' }\n  $exp = 'N/A'; $expDate = 'N/A'\n  $expVal = & $getProp $payload 'exp' $null\n  if ($null -ne $expVal) {\n    $exp = $expVal\n    $expDate = [DateTimeOffset]::FromUnixTimeSeconds($expVal).DateTime.ToString('yyyy-MM-dd HH:mm:ss UTC')\n  }\n  $iat = 'N/A'; $iatDate = 'N/A'\n  $iatVal = & $getProp $payload 'iat' $null\n  if ($null -ne $iatVal) {\n    $iat = $iatVal\n    $iatDate = [DateTimeOffset]::FromUnixTimeSeconds($iatVal).DateTime.ToString('yyyy-MM-dd HH:mm:ss UTC')\n  }\n  \n  $isExpired = $false\n  if ($null -ne $expVal) { $isExpired = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -gt $expVal }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  Write-XY @{ table = @{ title='JWT Header'; header=@('Property','Value'); rows=@(@('Algorithm', $alg), @('Type', $typ)); caption='' } }\n  Write-XY @{ table = @{ title='JWT Payload'; header=@('Property','Value'); rows=@(@('Issuer (iss)', $iss), @('Subject (sub)', $sub), @('Audience (aud)', $aud), @('Issued At (iat)', \"$iat ($iatDate)\"), @('Expires (exp)', \"$exp ($expDate)\"), @('Expired?', $(if ($isExpired) { '✗ Yes' } else { '✓ No' }))); caption=$(if ($isExpired) { 'Token has expired' } else { 'Token is still valid' }) } }\n  Write-XY @{ text = @{ title='Full Payload'; content=$payloadJson; caption='' } }\n  [pscustomobject]@{ tool='JWT Decoder'; algorithm=$alg; type=$typ; issuer=$iss; subject=$sub; audience=$aud; issuedAt=$iat; expiresAt=$exp; isExpired=$isExpired; header=$header; payload=$payload }\n}\n\n# ------------------------- Ping Test -------------------------\nfunction Invoke-PingTest {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  \n  $source = Get-Param $Params 'pingSource' 'field'\n  $host_ = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = Get-Param $Params 'pingDataPath' ''\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $host_ = [string]$val\n  } else { $host_ = Get-Param $Params 'pingHost' '' }\n  \n  if (-not $host_) { throw 'No host specified' }\n  \n  $count = [Math]::Min(10, [Math]::Max(1, [int](Get-Param $Params 'pingCount' 4)))\n  $timeout = [Math]::Min(30000, [Math]::Max(100, [int](Get-Param $Params 'pingTimeout' 1000)))\n  \n  Write-XYProgress 0.2 \"Pinging $host_...\"\n  \n  $pinger = [System.Net.NetworkInformation.Ping]::new()\n  $results = [System.Collections.Generic.List[object]]::new()\n  $successful = 0\n  $failed = 0\n  $latencies = [System.Collections.Generic.List[long]]::new()\n  \n  for ($i = 1; $i -le $count; $i++) {\n    Write-XYProgress (0.2 + (0.6 * $i / $count)) \"Ping $i of $count...\"\n    try {\n      $reply = $pinger.Send($host_, $timeout)\n      if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {\n        $successful++\n        $latencies.Add($reply.RoundtripTime)\n        $ttlVal = if ($null -ne $reply.Options) { $reply.Options.Ttl } else { '-' }\n        $addrVal = if ($null -ne $reply.Address) { $reply.Address.ToString() } else { '-' }\n        $results.Add([pscustomobject]@{ seq=$i; status='Success'; time=\"$($reply.RoundtripTime)ms\"; ttl=$ttlVal; address=$addrVal })\n      } else {\n        $failed++\n        $statusStr = $reply.Status.ToString()\n        $results.Add([pscustomobject]@{ seq=$i; status=$statusStr; time='-'; ttl='-'; address='-' })\n      }\n    } catch {\n      $failed++\n      $errMsg = $_.Exception.Message\n      # Truncate long error messages\n      if ($errMsg.Length -gt 50) { $errMsg = $errMsg.Substring(0, 47) + '...' }\n      $results.Add([pscustomobject]@{ seq=$i; status=\"Error: $errMsg\"; time='-'; ttl='-'; address='-' })\n    }\n    if ($i -lt $count) { Start-Sleep -Milliseconds 200 }\n  }\n  $pinger.Dispose()\n  \n  Write-XYProgress 0.9 'Calculating statistics...'\n  \n  $minLatency = if ($latencies.Count -gt 0) { ($latencies | Measure-Object -Minimum).Minimum } else { '-' }\n  $maxLatency = if ($latencies.Count -gt 0) { ($latencies | Measure-Object -Maximum).Maximum } else { '-' }\n  $avgLatency = if ($latencies.Count -gt 0) { [Math]::Round(($latencies | Measure-Object -Average).Average, 2) } else { '-' }\n  $lossPercent = [Math]::Round(($failed / $count) * 100, 1)\n  \n  # Resolve hostname\n  $resolvedIP = ''\n  try { $resolvedIP = ([System.Net.Dns]::GetHostAddresses($host_) | Select-Object -First 1).ToString() } catch { }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  # Build rows - each row must be an array wrapped with , to prevent flattening\n  $rows = @()\n  foreach ($r in $results) {\n    $rows += ,@($r.seq, $r.status, $r.time, $r.ttl, $r.address)\n  }\n  $resultCaption = if ($successful -eq $count) { \"All $count pings successful\" } elseif ($successful -eq 0) { \"All $count pings failed\" } else { \"$successful/$count successful, $lossPercent% loss\" }\n  Write-XY @{ table = @{ title=\"Ping Results - $host_\"; header=@('Seq','Status','Time','TTL','Address'); rows=$rows; caption=$resultCaption } }\n  \n  $statsRows = @(\n    @('Host', $host_),\n    @('Resolved IP', $(if ($resolvedIP) { $resolvedIP } else { 'N/A' })),\n    @('Packets Sent', $count),\n    @('Packets Received', $successful),\n    @('Packets Lost', $failed),\n    @('Loss Percentage', \"$lossPercent%\")\n  )\n  # Only show latency stats if we have successful pings\n  if ($latencies.Count -gt 0) {\n    $statsRows += @(@('Min Latency', \"${minLatency}ms\"), @('Max Latency', \"${maxLatency}ms\"), @('Avg Latency', \"${avgLatency}ms\"))\n  }\n  Write-XY @{ table = @{ title='Statistics'; header=@('Metric','Value'); rows=$statsRows; caption='' } }\n  \n  # If all pings failed, throw an error so job shows as failed\n  if ($successful -eq 0) {\n    # Get the first error message for context\n    $firstError = ($results | Select-Object -First 1).status\n    throw \"Ping failed: All $count pings to $host_ failed. Status: $firstError\"\n  }\n  \n  # Return appropriate latency values for JSON\n  $minLatencyOut = if ($latencies.Count -gt 0) { $minLatency } else { $null }\n  $maxLatencyOut = if ($latencies.Count -gt 0) { $maxLatency } else { $null }\n  $avgLatencyOut = if ($latencies.Count -gt 0) { $avgLatency } else { $null }\n  \n  [pscustomobject]@{ tool='Ping Test'; host=$host_; resolvedIP=$resolvedIP; count=$count; successful=$successful; failed=$failed; lossPercent=$lossPercent; minLatency=$minLatencyOut; maxLatency=$maxLatencyOut; avgLatency=$avgLatencyOut; results=$results.ToArray() }\n}\n\n# ------------------------- DNS Lookup -------------------------\nfunction Invoke-DnsLookup {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  \n  $source = Get-Param $Params 'dnsSource' 'field'\n  $query = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = Get-Param $Params 'dnsDataPath' ''\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $query = [string]$val\n  } else { $query = Get-Param $Params 'dnsQuery' '' }\n  \n  if (-not $query) { throw 'No query specified' }\n  \n  $recordType = Get-Param $Params 'dnsRecordType' 'A'\n  $dnsServer = Get-Param $Params 'dnsServer' ''\n  \n  Write-XYProgress 0.3 \"Resolving $recordType record for $query...\"\n  \n  $results = [System.Collections.Generic.List[object]]::new()\n  $success = $true\n  $errorMsg = ''\n  \n  try {\n    # Handle PTR (reverse DNS) specially\n    if ($recordType -eq 'PTR') {\n      # Convert IP to reverse lookup format\n      $ip = [System.Net.IPAddress]::Parse($query)\n      $hostEntry = [System.Net.Dns]::GetHostEntry($ip)\n      $results.Add([pscustomobject]@{ type='PTR'; name=$query; value=$hostEntry.HostName; ttl='-' })\n    }\n    elseif ($recordType -eq 'A' -or $recordType -eq 'AAAA') {\n      $addresses = [System.Net.Dns]::GetHostAddresses($query)\n      foreach ($addr in $addresses) {\n        if ($recordType -eq 'A' -and $addr.AddressFamily -eq 'InterNetwork') {\n          $results.Add([pscustomobject]@{ type='A'; name=$query; value=$addr.ToString(); ttl='-' })\n        }\n        elseif ($recordType -eq 'AAAA' -and $addr.AddressFamily -eq 'InterNetworkV6') {\n          $results.Add([pscustomobject]@{ type='AAAA'; name=$query; value=$addr.ToString(); ttl='-' })\n        }\n      }\n      if ($results.Count -eq 0) { $results.Add([pscustomobject]@{ type=$recordType; name=$query; value='No records found'; ttl='-' }) }\n    }\n    else {\n      # Use nslookup for other record types\n      $nslookupArgs = if ($dnsServer) { \"-type=$recordType $query $dnsServer\" } else { \"-type=$recordType $query\" }\n      $output = & nslookup $nslookupArgs.Split(' ') 2>&1\n      $outputText = $output -join \"`n\"\n      \n      # Parse nslookup output\n      switch ($recordType) {\n        'MX' {\n          $matches = [regex]::Matches($outputText, 'mail exchanger = (.+)')\n          foreach ($m in $matches) {\n            $parts = $m.Groups[1].Value.Trim() -split '\\s+'\n            $priority = if ($parts.Count -gt 1) { $parts[0] } else { '-' }\n            $server = if ($parts.Count -gt 1) { $parts[-1] } else { $parts[0] }\n            $results.Add([pscustomobject]@{ type='MX'; name=$query; value=\"$priority $server\"; ttl='-' })\n          }\n        }\n        'TXT' {\n          $matches = [regex]::Matches($outputText, 'text\\s*=\\s*\"([^\"]+)\"')\n          foreach ($m in $matches) {\n            $results.Add([pscustomobject]@{ type='TXT'; name=$query; value=$m.Groups[1].Value; ttl='-' })\n          }\n        }\n        'NS' {\n          $matches = [regex]::Matches($outputText, 'nameserver = (.+)')\n          foreach ($m in $matches) {\n            $results.Add([pscustomobject]@{ type='NS'; name=$query; value=$m.Groups[1].Value.Trim(); ttl='-' })\n          }\n        }\n        'CNAME' {\n          $matches = [regex]::Matches($outputText, 'canonical name = (.+)')\n          foreach ($m in $matches) {\n            $results.Add([pscustomobject]@{ type='CNAME'; name=$query; value=$m.Groups[1].Value.Trim(); ttl='-' })\n          }\n        }\n        'SOA' {\n          if ($outputText -match 'primary name server = ([^\\s]+)') {\n            $soa = $Matches[1]\n            $results.Add([pscustomobject]@{ type='SOA'; name=$query; value=\"Primary: $soa\"; ttl='-' })\n          }\n        }\n      }\n      if ($results.Count -eq 0) { $results.Add([pscustomobject]@{ type=$recordType; name=$query; value='No records found'; ttl='-' }) }\n    }\n  } catch {\n    $success = $false\n    $errorMsg = $_.Exception.Message\n    $results.Add([pscustomobject]@{ type=$recordType; name=$query; value=\"Error: $errorMsg\"; ttl='-' })\n  }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  # Build rows - each row must be an array wrapped with , to prevent flattening\n  $rows = @()\n  foreach ($r in $results) {\n    $rows += ,@($r.type, $r.name, $r.value, $r.ttl)\n  }\n  Write-XY @{ table = @{ title=\"DNS Lookup - $recordType\"; header=@('Type','Name','Value','TTL'); rows=$rows; caption=$(if ($dnsServer) { \"Using DNS server: $dnsServer\" } else { 'Using system DNS' }) } }\n  \n  [pscustomobject]@{ tool='DNS Lookup'; query=$query; recordType=$recordType; dnsServer=$(if ($dnsServer) { $dnsServer } else { 'system' }); success=$success; results=$results.ToArray(); error=$errorMsg }\n}\n\n# ------------------------- Traceroute -------------------------\nfunction Invoke-Traceroute {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  \n  $source = Get-Param $Params 'traceSource' 'field'\n  $host_ = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = Get-Param $Params 'traceDataPath' ''\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $host_ = [string]$val\n  } else { $host_ = Get-Param $Params 'traceHost' '' }\n  \n  if (-not $host_) { throw 'No host specified' }\n  \n  $maxHops = [Math]::Min(64, [Math]::Max(1, [int](Get-Param $Params 'traceMaxHops' 30)))\n  $timeout = [Math]::Min(10000, [Math]::Max(100, [int](Get-Param $Params 'traceTimeout' 3000)))\n  $resolveNames = if ($Params.PSObject.Properties.Name -contains 'traceResolveNames') { [bool]$Params.traceResolveNames } else { $true }\n  \n  Write-XYProgress 0.2 \"Tracing route to $host_...\"\n  \n  $pinger = [System.Net.NetworkInformation.Ping]::new()\n  $options = [System.Net.NetworkInformation.PingOptions]::new()\n  $buffer = [byte[]]::new(32)\n  $results = [System.Collections.Generic.List[object]]::new()\n  $reached = $false\n  \n  # Resolve destination first\n  $destIP = ''\n  try { $destIP = ([System.Net.Dns]::GetHostAddresses($host_) | Where-Object { $_.AddressFamily -eq 'InterNetwork' } | Select-Object -First 1).ToString() } catch { $destIP = $host_ }\n  \n  for ($ttl = 1; $ttl -le $maxHops; $ttl++) {\n    Write-XYProgress (0.2 + (0.7 * $ttl / $maxHops)) \"Hop $ttl...\"\n    $options.Ttl = $ttl\n    \n    $hopIP = '*'\n    $hopName = '*'\n    $hopTime = '*'\n    \n    try {\n      $reply = $pinger.Send($host_, $timeout, $buffer, $options)\n      if ($reply.Status -eq 'TtlExpired' -or $reply.Status -eq 'Success') {\n        $hopIP = $reply.Address.ToString()\n        $hopTime = \"$($reply.RoundtripTime)ms\"\n        \n        if ($resolveNames) {\n          try {\n            $hostEntry = [System.Net.Dns]::GetHostEntry($reply.Address)\n            $hopName = $hostEntry.HostName\n          } catch { $hopName = $hopIP }\n        } else { $hopName = $hopIP }\n        \n        if ($reply.Status -eq 'Success') { $reached = $true }\n      } elseif ($reply.Status -eq 'TimedOut') {\n        $hopIP = '*'; $hopName = 'Request timed out'; $hopTime = '*'\n      }\n    } catch {\n      $hopIP = '*'; $hopName = 'Error'; $hopTime = '*'\n    }\n    \n    $results.Add([pscustomobject]@{ hop=$ttl; ip=$hopIP; hostname=$hopName; time=$hopTime })\n    \n    if ($reached) { break }\n  }\n  $pinger.Dispose()\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  # Build rows - each row must be an array wrapped with , to prevent flattening\n  $rows = @()\n  foreach ($r in $results) {\n    $rows += ,@($r.hop, $r.ip, $r.hostname, $r.time)\n  }\n  Write-XY @{ table = @{ title=\"Traceroute - $host_\"; header=@('Hop','IP Address','Hostname','Time'); rows=$rows; caption=$(if ($reached) { \"Destination reached in $($results.Count) hops\" } else { \"Destination not reached within $maxHops hops\" }) } }\n  \n  [pscustomobject]@{ tool='Traceroute'; host=$host_; destinationIP=$destIP; maxHops=$maxHops; hopsUsed=$results.Count; reached=$reached; results=$results.ToArray() }\n}\n\n# ------------------------- Port Scanner -------------------------\nfunction Invoke-PortScanner {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  \n  $source = Get-Param $Params 'portSource' 'field'\n  $host_ = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = Get-Param $Params 'portDataPath' ''\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $host_ = [string]$val\n  } else { $host_ = Get-Param $Params 'portHost' '' }\n  \n  if (-not $host_) { throw 'No host specified' }\n  \n  $portsInput = Get-Param $Params 'portPorts' '80,443'\n  $timeout = [Math]::Min(30000, [Math]::Max(100, [int](Get-Param $Params 'portTimeout' 1000)))\n  \n  # Parse ports (supports comma-separated and ranges like 80-85)\n  $ports = [System.Collections.Generic.List[int]]::new()\n  foreach ($part in ($portsInput -split ',')) {\n    $part = $part.Trim()\n    if ($part -match '^(\\d+)-(\\d+)$') {\n      $start = [int]$Matches[1]; $end = [int]$Matches[2]\n      for ($p = $start; $p -le $end -and $ports.Count -lt 100; $p++) { $ports.Add($p) }\n    } elseif ($part -match '^\\d+$') {\n      if ($ports.Count -lt 100) { $ports.Add([int]$part) }\n    }\n  }\n  if ($ports.Count -eq 0) { throw 'No valid ports specified' }\n  \n  Write-XYProgress 0.2 \"Scanning $($ports.Count) port(s) on $host_...\"\n  \n  $results = [System.Collections.Generic.List[object]]::new()\n  $openPorts = 0\n  $closedPorts = 0\n  \n  $commonPorts = @{\n    20='FTP Data'; 21='FTP'; 22='SSH'; 23='Telnet'; 25='SMTP'; 53='DNS'; 80='HTTP'; 110='POP3'\n    143='IMAP'; 443='HTTPS'; 465='SMTPS'; 587='SMTP Submission'; 993='IMAPS'; 995='POP3S'\n    3306='MySQL'; 3389='RDP'; 5432='PostgreSQL'; 6379='Redis'; 8080='HTTP Proxy'; 8443='HTTPS Alt'\n  }\n  \n  $portIndex = 0\n  foreach ($port in $ports) {\n    $portIndex++\n    Write-XYProgress (0.2 + (0.7 * $portIndex / $ports.Count)) \"Scanning port $port...\"\n    \n    $status = 'Closed'\n    $service = if ($commonPorts.ContainsKey($port)) { $commonPorts[$port] } else { '-' }\n    \n    try {\n      $client = [System.Net.Sockets.TcpClient]::new()\n      $result = $client.BeginConnect($host_, $port, $null, $null)\n      $success = $result.AsyncWaitHandle.WaitOne($timeout, $false)\n      if ($success -and $client.Connected) {\n        $status = 'Open'\n        $openPorts++\n      } else {\n        $closedPorts++\n      }\n      $client.Close()\n    } catch {\n      $closedPorts++\n    }\n    \n    $results.Add([pscustomobject]@{ port=$port; status=$status; service=$service })\n  }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  # Build rows - each row must be an array wrapped with , to prevent flattening\n  $rows = @()\n  foreach ($r in $results) {\n    $rows += ,@($r.port, $r.status, $r.service)\n  }\n  Write-XY @{ table = @{ title=\"Port Scan - $host_\"; header=@('Port','Status','Service'); rows=$rows; caption=\"$openPorts open, $closedPorts closed\" } }\n  \n  [pscustomobject]@{ tool='Port Scanner'; host=$host_; portsScanned=$ports.Count; openPorts=$openPorts; closedPorts=$closedPorts; timeout=$timeout; results=$results.ToArray() }\n}\n\n# ------------------------- HTTP Status Checker -------------------------\nfunction Invoke-HttpChecker {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  \n  $source = Get-Param $Params 'httpSource' 'field'\n  $url = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = Get-Param $Params 'httpDataPath' ''\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $url = [string]$val\n  } else { $url = Get-Param $Params 'httpUrl' '' }\n  \n  if (-not $url) { throw 'No URL specified' }\n  if ($url -notmatch '^https?://') { $url = \"https://$url\" }\n  \n  $method = Get-Param $Params 'httpMethod' 'GET'\n  $timeout = [Math]::Min(60, [Math]::Max(1, [int](Get-Param $Params 'httpTimeout' 10)))\n  $followRedirects = if ($Params.PSObject.Properties.Name -contains 'httpFollowRedirects') { [bool]$Params.httpFollowRedirects } else { $true }\n  \n  Write-XYProgress 0.3 \"Sending $method request to $url...\"\n  \n  $statusCode = 0\n  $statusDesc = ''\n  $responseTime = 0\n  $headers = @{}\n  $contentType = ''\n  $contentLength = 0\n  $server = ''\n  $redirectUrl = ''\n  $errorMsg = ''\n  $success = $true\n  \n  try {\n    $handler = [System.Net.Http.HttpClientHandler]::new()\n    $handler.AllowAutoRedirect = $followRedirects\n    $client = [System.Net.Http.HttpClient]::new($handler)\n    $client.Timeout = [TimeSpan]::FromSeconds($timeout)\n    \n    $sw = [System.Diagnostics.Stopwatch]::StartNew()\n    $response = switch ($method) {\n      'GET' { $client.GetAsync($url).Result }\n      'HEAD' { $client.SendAsync([System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Head, $url)).Result }\n      'POST' { $client.PostAsync($url, [System.Net.Http.StringContent]::new('')).Result }\n      default { $client.GetAsync($url).Result }\n    }\n    $sw.Stop()\n    $responseTime = $sw.ElapsedMilliseconds\n    \n    $statusCode = [int]$response.StatusCode\n    $statusDesc = $response.ReasonPhrase\n    \n    foreach ($h in $response.Headers) { $headers[$h.Key] = ($h.Value -join ', ') }\n    foreach ($h in $response.Content.Headers) { $headers[$h.Key] = ($h.Value -join ', ') }\n    \n    $contentType = if ($headers.ContainsKey('Content-Type')) { $headers['Content-Type'] } else { '-' }\n    $contentLength = if ($headers.ContainsKey('Content-Length')) { [long]$headers['Content-Length'] } else { 0 }\n    $server = if ($headers.ContainsKey('Server')) { $headers['Server'] } else { '-' }\n    \n    if (-not $followRedirects -and $statusCode -ge 300 -and $statusCode -lt 400) {\n      $redirectUrl = if ($headers.ContainsKey('Location')) { $headers['Location'] } else { '-' }\n    }\n    \n    $client.Dispose()\n  } catch {\n    $success = $false\n    $errorMsg = $_.Exception.InnerException?.Message ?? $_.Exception.Message\n  }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  $summaryRows = @(\n    @('URL', $url),\n    @('Method', $method),\n    @('Status Code', $(if ($success) { \"$statusCode $statusDesc\" } else { 'Error' })),\n    @('Response Time', \"${responseTime}ms\"),\n    @('Content-Type', $contentType),\n    @('Content-Length', $(if ($contentLength -gt 0) { \"$contentLength bytes\" } else { '-' })),\n    @('Server', $server)\n  )\n  if ($redirectUrl) { $summaryRows += ,@('Redirect URL', $redirectUrl) }\n  if ($errorMsg) { $summaryRows += ,@('Error', $errorMsg) }\n  \n  Write-XY @{ table = @{ title='HTTP Response'; header=@('Property','Value'); rows=$summaryRows; caption=$(if ($success) { 'Request completed' } else { 'Request failed' }) } }\n  \n  if ($success -and $headers.Count -gt 0) {\n    $headerRows = @()\n    foreach ($h in ($headers.GetEnumerator() | Sort-Object Key)) {\n      $val = if ($h.Value.Length -gt 60) { $h.Value.Substring(0, 60) + '...' } else { $h.Value }\n      $headerRows += ,@($h.Key, $val)\n    }\n    Write-XY @{ table = @{ title='Response Headers'; header=@('Header','Value'); rows=$headerRows; caption='' } }\n  }\n  \n  [pscustomobject]@{ tool='HTTP Status Checker'; url=$url; method=$method; success=$success; statusCode=$statusCode; statusDescription=$statusDesc; responseTime=$responseTime; contentType=$contentType; contentLength=$contentLength; server=$server; redirectUrl=$redirectUrl; headers=$headers; error=$errorMsg }\n}\n\n# ------------------------- SSL Certificate Checker -------------------------\nfunction Invoke-SslChecker {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  \n  $source = Get-Param $Params 'sslSource' 'field'\n  $host_ = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = Get-Param $Params 'sslDataPath' ''\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $host_ = [string]$val\n  } else { $host_ = Get-Param $Params 'sslHost' '' }\n  \n  if (-not $host_) { throw 'No host specified' }\n  \n  # Remove protocol if present\n  $host_ = $host_ -replace '^https?://', '' -replace '/.*$', ''\n  $port = 443\n  if ($host_ -match '^(.+):(\\d+)$') { $host_ = $Matches[1]; $port = [int]$Matches[2] }\n  \n  Write-XYProgress 0.3 \"Checking SSL certificate for $host_`:$port...\"\n  \n  $cert = $null\n  $chain = $null\n  $success = $true\n  $errorMsg = ''\n  \n  try {\n    $client = [System.Net.Sockets.TcpClient]::new($host_, $port)\n    $sslStream = [System.Net.Security.SslStream]::new($client.GetStream(), $false, { $true })\n    $sslStream.AuthenticateAsClient($host_)\n    \n    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($sslStream.RemoteCertificate)\n    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()\n    $chain.Build($cert) | Out-Null\n    \n    $sslStream.Close()\n    $client.Close()\n  } catch {\n    $success = $false\n    $errorMsg = $_.Exception.InnerException?.Message ?? $_.Exception.Message\n  }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  if ($success -and $cert) {\n    $now = [DateTime]::UtcNow\n    $notBefore = $cert.NotBefore.ToUniversalTime()\n    $notAfter = $cert.NotAfter.ToUniversalTime()\n    $daysUntilExpiry = [Math]::Floor(($notAfter - $now).TotalDays)\n    $isExpired = $now -gt $notAfter\n    $isNotYetValid = $now -lt $notBefore\n    \n    $subject = $cert.Subject\n    $issuer = $cert.Issuer\n    $thumbprint = $cert.Thumbprint\n    $serialNumber = $cert.SerialNumber\n    $signatureAlg = $cert.SignatureAlgorithm.FriendlyName\n    \n    # Extract CN from subject\n    $cn = ''\n    if ($subject -match 'CN=([^,]+)') { $cn = $Matches[1] }\n    \n    # Get SANs\n    $sans = [System.Collections.Generic.List[string]]::new()\n    foreach ($ext in $cert.Extensions) {\n      if ($ext.Oid.Value -eq '2.5.29.17') {\n        $sanText = $ext.Format($false)\n        $sanMatches = [regex]::Matches($sanText, 'DNS Name=([^,\\s]+)')\n        foreach ($m in $sanMatches) { $sans.Add($m.Groups[1].Value) }\n      }\n    }\n    \n    $validity = if ($isExpired) { 'EXPIRED' } elseif ($isNotYetValid) { 'NOT YET VALID' } elseif ($daysUntilExpiry -le 30) { 'EXPIRING SOON' } else { 'Valid' }\n    \n    $summaryRows = @(\n      @('Host', \"$host_`:$port\"),\n      @('Common Name (CN)', $cn),\n      @('Subject', $(if ($subject.Length -gt 60) { $subject.Substring(0,60) + '...' } else { $subject })),\n      @('Issuer', $(if ($issuer.Length -gt 60) { $issuer.Substring(0,60) + '...' } else { $issuer })),\n      @('Valid From', $notBefore.ToString('yyyy-MM-dd HH:mm:ss UTC')),\n      @('Valid Until', $notAfter.ToString('yyyy-MM-dd HH:mm:ss UTC')),\n      @('Days Until Expiry', $daysUntilExpiry),\n      @('Status', $validity),\n      @('Signature Algorithm', $signatureAlg),\n      @('Thumbprint', $thumbprint),\n      @('Serial Number', $serialNumber)\n    )\n    \n    Write-XY @{ table = @{ title='SSL Certificate'; header=@('Property','Value'); rows=$summaryRows; caption=$validity } }\n    \n    if ($sans.Count -gt 0) {\n      $sanRows = for ($i = 0; $i -lt [Math]::Min($sans.Count, 20); $i++) { ,@(($i + 1), $sans[$i]) }\n      Write-XY @{ table = @{ title='Subject Alternative Names (SANs)'; header=@('#','DNS Name'); rows=$sanRows; caption=\"$($sans.Count) SAN(s)\" } }\n    }\n    \n    if ($chain -and $chain.ChainElements.Count -gt 1) {\n      $chainRows = @()\n      for ($i = 0; $i -lt $chain.ChainElements.Count; $i++) {\n        $elem = $chain.ChainElements[$i].Certificate\n        $elemCn = ''; if ($elem.Subject -match 'CN=([^,]+)') { $elemCn = $Matches[1] }\n        $chainRows += ,@($i, $elemCn, $elem.NotAfter.ToString('yyyy-MM-dd'))\n      }\n      Write-XY @{ table = @{ title='Certificate Chain'; header=@('Level','Common Name','Expires'); rows=$chainRows; caption='' } }\n    }\n    \n    [pscustomobject]@{ tool='SSL Certificate Checker'; host=\"$host_`:$port\"; success=$true; commonName=$cn; subject=$subject; issuer=$issuer; validFrom=$notBefore; validUntil=$notAfter; daysUntilExpiry=$daysUntilExpiry; isExpired=$isExpired; validity=$validity; signatureAlgorithm=$signatureAlg; thumbprint=$thumbprint; serialNumber=$serialNumber; sans=$sans.ToArray() }\n  } else {\n    Write-XY @{ table = @{ title='SSL Certificate Error'; header=@('Property','Value'); rows=@(@('Host', \"$host_`:$port\"), @('Error', $errorMsg)); caption='Failed to retrieve certificate' } }\n    [pscustomobject]@{ tool='SSL Certificate Checker'; host=\"$host_`:$port\"; success=$false; error=$errorMsg }\n  }\n}\n\n# ------------------------- WHOIS Lookup -------------------------\nfunction Invoke-WhoisLookup {\n  param($Params, $JobInput)\n  Write-XYProgress 0.1 'Validating parameters...'\n  \n  $source = Get-Param $Params 'whoisSource' 'field'\n  $domain = ''\n  \n  if ($source -eq 'input') {\n    $inputData = $JobInput.data\n    if (-not $inputData) { throw 'No input data available from previous job' }\n    $path = Get-Param $Params 'whoisDataPath' ''\n    $val = Get-NestedValue $inputData $path\n    if ($null -eq $val) { throw \"Data path '$path' not found in input data\" }\n    $domain = [string]$val\n  } else { $domain = Get-Param $Params 'whoisDomain' '' }\n  \n  if (-not $domain) { throw 'No domain specified' }\n  \n  # Clean domain\n  $domain = $domain -replace '^https?://', '' -replace '/.*$', '' -replace '^www\\.', ''\n  \n  Write-XYProgress 0.3 \"Looking up WHOIS for $domain...\"\n  \n  $whoisData = @{}\n  $rawResponse = ''\n  $success = $true\n  $errorMsg = ''\n  \n  try {\n    # Determine WHOIS server based on TLD\n    $tld = ($domain -split '\\.')[-1].ToLower()\n    $whoisServer = switch ($tld) {\n      'com' { 'whois.verisign-grs.com' }\n      'net' { 'whois.verisign-grs.com' }\n      'org' { 'whois.pir.org' }\n      'io' { 'whois.nic.io' }\n      'co' { 'whois.nic.co' }\n      'me' { 'whois.nic.me' }\n      'info' { 'whois.afilias.net' }\n      'biz' { 'whois.biz' }\n      'dev' { 'whois.nic.google' }\n      'app' { 'whois.nic.google' }\n      'uk' { 'whois.nic.uk' }\n      'de' { 'whois.denic.de' }\n      'fr' { 'whois.nic.fr' }\n      'nl' { 'whois.domain-registry.nl' }\n      'eu' { 'whois.eu' }\n      'au' { 'whois.auda.org.au' }\n      default { 'whois.iana.org' }\n    }\n    \n    $client = [System.Net.Sockets.TcpClient]::new($whoisServer, 43)\n    $stream = $client.GetStream()\n    $writer = [System.IO.StreamWriter]::new($stream)\n    $reader = [System.IO.StreamReader]::new($stream)\n    \n    $writer.WriteLine($domain)\n    $writer.Flush()\n    \n    $rawResponse = $reader.ReadToEnd()\n    \n    $reader.Close()\n    $writer.Close()\n    $client.Close()\n    \n    # Parse common WHOIS fields\n    $patterns = @{\n      'Registrar' = 'Registrar:\\s*(.+)'\n      'Creation Date' = '(Creation Date|Created|Registered):\\s*(.+)'\n      'Expiration Date' = '(Expir[ey]|Registry Expiry Date).*?:\\s*(.+)'\n      'Updated Date' = '(Updated Date|Last Updated|Modified):\\s*(.+)'\n      'Name Servers' = 'Name Server:\\s*(.+)'\n      'Status' = '(Domain )?Status:\\s*(.+)'\n      'Registrant' = 'Registrant.*?:\\s*(.+)'\n      'Admin Contact' = 'Admin.*?(Name|Contact):\\s*(.+)'\n    }\n    \n    foreach ($key in $patterns.Keys) {\n      $matches = [regex]::Matches($rawResponse, $patterns[$key], 'IgnoreCase,Multiline')\n      if ($matches.Count -gt 0) {\n        $values = $matches | ForEach-Object { $_.Groups[$_.Groups.Count - 1].Value.Trim() } | Select-Object -Unique\n        $whoisData[$key] = $values -join ', '\n      }\n    }\n    \n    # Special handling for name servers (collect all)\n    $nsMatches = [regex]::Matches($rawResponse, 'Name Server:\\s*(.+)', 'IgnoreCase,Multiline')\n    if ($nsMatches.Count -gt 0) {\n      $whoisData['Name Servers'] = ($nsMatches | ForEach-Object { $_.Groups[1].Value.Trim().ToLower() } | Select-Object -Unique) -join ', '\n    }\n  } catch {\n    $success = $false\n    $errorMsg = $_.Exception.Message\n  }\n  \n  Write-XYProgress 0.95 'Finalizing...'\n  \n  if ($success) {\n    $summaryRows = @()\n    $summaryRows += ,@('Domain', $domain)\n    foreach ($key in @('Registrar', 'Creation Date', 'Expiration Date', 'Updated Date', 'Status', 'Name Servers')) {\n      if ($whoisData.ContainsKey($key)) {\n        $val = $whoisData[$key]\n        if ($val.Length -gt 60) { $val = $val.Substring(0, 60) + '...' }\n        $summaryRows += ,@($key, $val)\n      }\n    }\n    \n    Write-XY @{ table = @{ title='WHOIS Information'; header=@('Property','Value'); rows=$summaryRows; caption=\"Data from WHOIS server\" } }\n    \n    # Show raw response preview\n    $preview = if ($rawResponse.Length -gt 1500) { $rawResponse.Substring(0, 1500) + \"`n... (truncated)\" } else { $rawResponse }\n    Write-XY @{ text = @{ title='Raw WHOIS Response'; content=$preview; caption='' } }\n    \n    [pscustomobject]@{ tool='WHOIS Lookup'; domain=$domain; success=$true; registrar=$whoisData['Registrar']; creationDate=$whoisData['Creation Date']; expirationDate=$whoisData['Expiration Date']; updatedDate=$whoisData['Updated Date']; nameServers=$whoisData['Name Servers']; status=$whoisData['Status']; rawResponse=$rawResponse }\n  } else {\n    Write-XY @{ table = @{ title='WHOIS Error'; header=@('Property','Value'); rows=@(@('Domain', $domain), @('Error', $errorMsg)); caption='Lookup failed' } }\n    [pscustomobject]@{ tool='WHOIS Lookup'; domain=$domain; success=$false; error=$errorMsg }\n  }\n}\n\n# ------------------------- Main -------------------------\ntry {\n  $job = Read-JobFromStdin\n  $params = $job.params\n  $tool = if ($params.PSObject.Properties.Name -contains 'tool') { $params.tool } else { 'pingTest' }\n  $cwd = if ($job.PSObject.Properties.Name -contains 'cwd') { [string]$job.cwd } else { (Get-Location).Path }\n  $jobInput = if ($job.PSObject.Properties.Name -contains 'input') { $job.input } else { @{} }\n\n  $result = $null\n  switch ($tool) {\n    'ipAddressTools' { $result = Invoke-IPAddressTools -Params $params -JobInput $jobInput }\n    'jwtDecoder'     { $result = Invoke-JWTDecoder -Params $params -JobInput $jobInput }\n    'pingTest'       { $result = Invoke-PingTest -Params $params -JobInput $jobInput }\n    'dnsLookup'      { $result = Invoke-DnsLookup -Params $params -JobInput $jobInput }\n    'traceroute'     { $result = Invoke-Traceroute -Params $params -JobInput $jobInput }\n    'portScanner'    { $result = Invoke-PortScanner -Params $params -JobInput $jobInput }\n    'httpChecker'    { $result = Invoke-HttpChecker -Params $params -JobInput $jobInput }\n    'sslChecker'     { $result = Invoke-SslChecker -Params $params -JobInput $jobInput }\n    'whoisLookup'    { $result = Invoke-WhoisLookup -Params $params -JobInput $jobInput }\n    default          { throw \"Unknown tool: $tool\" }\n  }\n\n  Write-XYSuccess -Data $result -Description (\"{0} completed successfully\" -f $result.tool)\n  [Console]::Out.Flush()\n  exit 0\n}\ncatch {\n  Write-XYError -Code 1 -Description ($_.Exception.Message)\n  [Console]::Out.Flush()\n  exit 1\n}",
+				"groups": [],
+				"format": "",
+				"params": [
 					{
-						"id": "ipAddressTools",
-						"title": "IP Address Tools",
-						"description": "Validate, convert, and analyze IP addresses.",
-						"fields": [
-							{
-								"id": "ipMode",
-								"title": "Mode",
-								"type": "select",
-								"value": "Validate & Analyze [validate], IP to Decimal [toDecimal], Decimal to IP [fromDecimal], IP to Binary [toBinary], Subnet Calculator [subnet]",
-								"caption": "Select the operation to perform."
-							},
-							{
-								"id": "ipSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the IP."
-							},
-							{
-								"id": "ipInput",
-								"title": "IP Address / Value",
-								"type": "text",
-								"value": "",
-								"caption": "IP address or decimal value. For subnet mode, use CIDR (e.g., 192.168.1.0/24)."
-							},
-							{
-								"id": "ipDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to the data field. (Used when Data Source is 'input data')"
-							}
-						]
-					},
-					{
-						"id": "jwtDecoder",
-						"title": "JWT Decoder",
-						"description": "Decode and inspect JWT tokens (header, payload, expiration).",
-						"fields": [
-							{
-								"id": "jwtSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the JWT."
-							},
-							{
-								"id": "jwtInput",
-								"title": "JWT Token",
-								"type": "textarea",
-								"value": "",
-								"caption": "JWT token to decode."
-							},
-							{
-								"id": "jwtDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to the data field. (Used when Data Source is 'input data')"
-							}
-						]
-					},
-					{
-						"id": "pingTest",
-						"title": "Ping Test",
-						"description": "Ping a host and measure latency with statistics.",
-						"fields": [
-							{
-								"id": "pingSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the host."
-							},
-							{
-								"id": "pingHost",
-								"title": "Host",
-								"type": "text",
-								"value": "",
-								"caption": "Hostname or IP address to ping."
-							},
-							{
-								"id": "pingDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to data field (when source is 'input')."
-							},
-							{
-								"id": "pingCount",
-								"title": "Ping Count",
-								"type": "text",
-								"value": "4",
-								"variant": "number",
-								"caption": "Number of pings to send (1-10)."
-							},
-							{
-								"id": "pingTimeout",
-								"title": "Timeout (ms)",
-								"type": "text",
-								"value": "1000",
-								"variant": "number",
-								"caption": "Timeout per ping in milliseconds (100-30000)."
-							}
-						]
-					},
-					{
-						"id": "dnsLookup",
-						"title": "DNS Lookup",
-						"description": "Resolve DNS records including A, AAAA, MX, TXT, CNAME, NS, SOA, and PTR (reverse).",
-						"fields": [
-							{
-								"id": "dnsSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the query."
-							},
-							{
-								"id": "dnsQuery",
-								"title": "Domain / IP",
-								"type": "text",
-								"value": "",
-								"caption": "Domain name or IP address (for PTR/reverse lookup)."
-							},
-							{
-								"id": "dnsDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to data field (when source is 'input')."
-							},
-							{
-								"id": "dnsRecordType",
-								"title": "Record Type",
-								"type": "select",
-								"value": "A Record (IPv4) [A], AAAA Record (IPv6) [AAAA], MX Record (Mail) [MX], TXT Record [TXT], CNAME Record [CNAME], NS Record (Name Server) [NS], SOA Record [SOA], PTR Record (Reverse DNS) [PTR]",
-								"caption": "Type of DNS record to query."
-							},
-							{
-								"id": "dnsServer",
-								"title": "DNS Server (optional)",
-								"type": "text",
-								"value": "",
-								"caption": "Custom DNS server (e.g., 8.8.8.8, 1.1.1.1). Leave empty for system DNS."
-							}
-						]
-					},
-					{
-						"id": "traceroute",
-						"title": "Traceroute",
-						"description": "Trace the network path to a host, showing each hop.",
-						"fields": [
-							{
-								"id": "traceSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the host."
-							},
-							{
-								"id": "traceHost",
-								"title": "Host",
-								"type": "text",
-								"value": "",
-								"caption": "Hostname or IP address to trace."
-							},
-							{
-								"id": "traceDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to data field (when source is 'input')."
-							},
-							{
-								"id": "traceMaxHops",
-								"title": "Max Hops",
-								"type": "text",
-								"value": "30",
-								"variant": "number",
-								"caption": "Maximum number of hops (1-64)."
-							},
-							{
-								"id": "traceTimeout",
-								"title": "Timeout (ms)",
-								"type": "text",
-								"value": "3000",
-								"variant": "number",
-								"caption": "Timeout per hop in milliseconds."
-							},
-							{
-								"id": "traceResolveNames",
-								"title": "Resolve Hostnames",
-								"type": "checkbox",
-								"value": true,
-								"caption": "Resolve IP addresses to hostnames."
-							}
-						]
-					},
-					{
-						"id": "portScanner",
-						"title": "Port Scanner",
-						"description": "Check if specific ports are open on a host.",
-						"fields": [
-							{
-								"id": "portSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the host."
-							},
-							{
-								"id": "portHost",
-								"title": "Host",
-								"type": "text",
-								"value": "",
-								"caption": "Hostname or IP address to scan."
-							},
-							{
-								"id": "portDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to data field (when source is 'input')."
-							},
-							{
-								"id": "portPorts",
-								"title": "Ports",
-								"type": "text",
-								"value": "80,443",
-								"caption": "Comma-separated ports or ranges (e.g., 80,443,8080-8090). Max 100 ports."
-							},
-							{
-								"id": "portTimeout",
-								"title": "Timeout (ms)",
-								"type": "text",
-								"value": "1000",
-								"variant": "number",
-								"caption": "Connection timeout per port in milliseconds."
-							}
-						]
-					},
-					{
-						"id": "httpChecker",
-						"title": "HTTP Status Checker",
-						"description": "Check HTTP status, response time, and headers for a URL.",
-						"fields": [
-							{
-								"id": "httpSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the URL."
-							},
-							{
-								"id": "httpUrl",
-								"title": "URL",
-								"type": "text",
-								"value": "",
-								"caption": "URL to check (https:// added if not specified)."
-							},
-							{
-								"id": "httpDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to data field (when source is 'input')."
-							},
-							{
-								"id": "httpMethod",
-								"title": "HTTP Method",
-								"type": "select",
-								"value": "GET [GET], HEAD [HEAD], POST [POST]",
-								"caption": "HTTP method to use."
-							},
-							{
-								"id": "httpTimeout",
-								"title": "Timeout (seconds)",
-								"type": "text",
-								"value": "10",
-								"variant": "number",
-								"caption": "Request timeout in seconds (1-60)."
-							},
-							{
-								"id": "httpFollowRedirects",
-								"title": "Follow Redirects",
-								"type": "checkbox",
-								"value": true,
-								"caption": "Automatically follow HTTP redirects."
-							}
-						]
-					},
-					{
-						"id": "sslChecker",
-						"title": "SSL Certificate Checker",
-						"description": "Check SSL/TLS certificate details, expiry, and validity.",
-						"fields": [
-							{
-								"id": "sslSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the host."
-							},
-							{
-								"id": "sslHost",
-								"title": "Host",
-								"type": "text",
-								"value": "",
-								"caption": "Hostname or URL (port 443 default, or specify host:port)."
-							},
-							{
-								"id": "sslDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to data field (when source is 'input')."
-							}
-						]
-					},
-					{
-						"id": "whoisLookup",
-						"title": "WHOIS Lookup",
-						"description": "Look up domain registration information via WHOIS.",
-						"fields": [
-							{
-								"id": "whoisSource",
-								"title": "Data Source",
-								"type": "select",
-								"value": "Use text field below [field], Use job input data [input]",
-								"caption": "Choose where to get the domain."
-							},
-							{
-								"id": "whoisDomain",
-								"title": "Domain",
-								"type": "text",
-								"value": "",
-								"caption": "Domain name to look up (e.g., example.com)."
-							},
-							{
-								"id": "whoisDataPath",
-								"title": "Input Data Path",
-								"type": "text",
-								"value": "",
-								"caption": "Dot-notation path to data field (when source is 'input')."
-							}
-						]
+						"id": "tool",
+						"title": "Tool",
+						"type": "toolset",
+						"caption": "Select a network tool.",
+						"locked": false,
+						"data": {
+							"tools": [
+								{
+									"id": "ipAddressTools",
+									"title": "IP Address Tools",
+									"description": "Validate, convert, and analyze IP addresses.",
+									"fields": [
+										{
+											"id": "ipMode",
+											"title": "Mode",
+											"type": "select",
+											"value": "Validate & Analyze [validate], IP to Decimal [toDecimal], Decimal to IP [fromDecimal], IP to Binary [toBinary], Subnet Calculator [subnet]",
+											"caption": "Select the operation to perform."
+										},
+										{
+											"id": "ipSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the IP."
+										},
+										{
+											"id": "ipInput",
+											"title": "IP Address / Value",
+											"type": "text",
+											"value": "",
+											"caption": "IP address or decimal value. For subnet mode, use CIDR (e.g., 192.168.1.0/24)."
+										},
+										{
+											"id": "ipDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to the data field. (Used when Data Source is 'input data')"
+										}
+									]
+								},
+								{
+									"id": "jwtDecoder",
+									"title": "JWT Decoder",
+									"description": "Decode and inspect JWT tokens (header, payload, expiration).",
+									"fields": [
+										{
+											"id": "jwtSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the JWT."
+										},
+										{
+											"id": "jwtInput",
+											"title": "JWT Token",
+											"type": "textarea",
+											"value": "",
+											"caption": "JWT token to decode."
+										},
+										{
+											"id": "jwtDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to the data field. (Used when Data Source is 'input data')"
+										}
+									]
+								},
+								{
+									"id": "pingTest",
+									"title": "Ping Test",
+									"description": "Ping a host and measure latency with statistics.",
+									"fields": [
+										{
+											"id": "pingSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the host."
+										},
+										{
+											"id": "pingHost",
+											"title": "Host",
+											"type": "text",
+											"value": "",
+											"caption": "Hostname or IP address to ping."
+										},
+										{
+											"id": "pingDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to data field (when source is 'input')."
+										},
+										{
+											"id": "pingCount",
+											"title": "Ping Count",
+											"type": "text",
+											"value": 4,
+											"variant": "number",
+											"caption": "Number of pings to send (1-10)."
+										},
+										{
+											"id": "pingTimeout",
+											"title": "Timeout (ms)",
+											"type": "text",
+											"value": 1000,
+											"variant": "number",
+											"caption": "Timeout per ping in milliseconds (100-30000)."
+										}
+									]
+								},
+								{
+									"id": "dnsLookup",
+									"title": "DNS Lookup",
+									"description": "Resolve DNS records including A, AAAA, MX, TXT, CNAME, NS, SOA, and PTR (reverse).",
+									"fields": [
+										{
+											"id": "dnsSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the query."
+										},
+										{
+											"id": "dnsQuery",
+											"title": "Domain / IP",
+											"type": "text",
+											"value": "",
+											"caption": "Domain name or IP address (for PTR/reverse lookup)."
+										},
+										{
+											"id": "dnsDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to data field (when source is 'input')."
+										},
+										{
+											"id": "dnsRecordType",
+											"title": "Record Type",
+											"type": "select",
+											"value": "A Record (IPv4) [A], AAAA Record (IPv6) [AAAA], MX Record (Mail) [MX], TXT Record [TXT], CNAME Record [CNAME], NS Record (Name Server) [NS], SOA Record [SOA], PTR Record (Reverse DNS) [PTR]",
+											"caption": "Type of DNS record to query."
+										},
+										{
+											"id": "dnsServer",
+											"title": "DNS Server (optional)",
+											"type": "text",
+											"value": "",
+											"caption": "Custom DNS server (e.g., 8.8.8.8, 1.1.1.1). Leave empty for system DNS."
+										}
+									]
+								},
+								{
+									"id": "traceroute",
+									"title": "Traceroute",
+									"description": "Trace the network path to a host, showing each hop.",
+									"fields": [
+										{
+											"id": "traceSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the host."
+										},
+										{
+											"id": "traceHost",
+											"title": "Host",
+											"type": "text",
+											"value": "",
+											"caption": "Hostname or IP address to trace."
+										},
+										{
+											"id": "traceDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to data field (when source is 'input')."
+										},
+										{
+											"id": "traceMaxHops",
+											"title": "Max Hops",
+											"type": "text",
+											"value": 30,
+											"variant": "number",
+											"caption": "Maximum number of hops (1-64)."
+										},
+										{
+											"id": "traceTimeout",
+											"title": "Timeout (ms)",
+											"type": "text",
+											"value": 3000,
+											"variant": "number",
+											"caption": "Timeout per hop in milliseconds."
+										},
+										{
+											"id": "traceResolveNames",
+											"title": "Resolve Hostnames",
+											"type": "checkbox",
+											"value": true,
+											"caption": "Resolve IP addresses to hostnames."
+										}
+									]
+								},
+								{
+									"id": "portScanner",
+									"title": "Port Scanner",
+									"description": "Check if specific ports are open on a host.",
+									"fields": [
+										{
+											"id": "portSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the host."
+										},
+										{
+											"id": "portHost",
+											"title": "Host",
+											"type": "text",
+											"value": "",
+											"caption": "Hostname or IP address to scan."
+										},
+										{
+											"id": "portDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to data field (when source is 'input')."
+										},
+										{
+											"id": "portPorts",
+											"title": "Ports",
+											"type": "text",
+											"value": "80,443",
+											"caption": "Comma-separated ports or ranges (e.g., 80,443,8080-8090). Max 100 ports."
+										},
+										{
+											"id": "portTimeout",
+											"title": "Timeout (ms)",
+											"type": "text",
+											"value": 1000,
+											"variant": "number",
+											"caption": "Connection timeout per port in milliseconds."
+										}
+									]
+								},
+								{
+									"id": "httpChecker",
+									"title": "HTTP Status Checker",
+									"description": "Check HTTP status, response time, and headers for a URL.",
+									"fields": [
+										{
+											"id": "httpSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the URL."
+										},
+										{
+											"id": "httpUrl",
+											"title": "URL",
+											"type": "text",
+											"value": "",
+											"caption": "URL to check (https:// added if not specified)."
+										},
+										{
+											"id": "httpDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to data field (when source is 'input')."
+										},
+										{
+											"id": "httpMethod",
+											"title": "HTTP Method",
+											"type": "select",
+											"value": "GET [GET], HEAD [HEAD], POST [POST]",
+											"caption": "HTTP method to use."
+										},
+										{
+											"id": "httpTimeout",
+											"title": "Timeout (seconds)",
+											"type": "text",
+											"value": 10,
+											"variant": "number",
+											"caption": "Request timeout in seconds (1-60)."
+										},
+										{
+											"id": "httpFollowRedirects",
+											"title": "Follow Redirects",
+											"type": "checkbox",
+											"value": true,
+											"caption": "Automatically follow HTTP redirects."
+										}
+									]
+								},
+								{
+									"id": "sslChecker",
+									"title": "SSL Certificate Checker",
+									"description": "Check SSL/TLS certificate details, expiry, and validity.",
+									"fields": [
+										{
+											"id": "sslSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the host."
+										},
+										{
+											"id": "sslHost",
+											"title": "Host",
+											"type": "text",
+											"value": "",
+											"caption": "Hostname or URL (port 443 default, or specify host:port)."
+										},
+										{
+											"id": "sslDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to data field (when source is 'input')."
+										}
+									]
+								},
+								{
+									"id": "whoisLookup",
+									"title": "WHOIS Lookup",
+									"description": "Look up domain registration information via WHOIS.",
+									"fields": [
+										{
+											"id": "whoisSource",
+											"title": "Data Source",
+											"type": "select",
+											"value": "Use text field below [field], Use job input data [input]",
+											"caption": "Choose where to get the domain."
+										},
+										{
+											"id": "whoisDomain",
+											"title": "Domain",
+											"type": "text",
+											"value": "",
+											"caption": "Domain name to look up (e.g., example.com)."
+										},
+										{
+											"id": "whoisDataPath",
+											"title": "Input Data Path",
+											"type": "text",
+											"value": "",
+											"caption": "Dot-notation path to data field (when source is 'input')."
+										}
+									]
+								}
+							]
+						}
 					}
-				]
+				],
+				"notes": "",
+				"icon": "check-network-outline",
+				"uid": "",
+				"gid": "",
+				"kill": "none",
+				"runner": false
 			}
 		}
 	]

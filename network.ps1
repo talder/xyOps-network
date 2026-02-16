@@ -213,25 +213,37 @@ function Invoke-JWTDecoder {
   $header = $headerJson | ConvertFrom-Json
   $payload = $payloadJson | ConvertFrom-Json
   
+  # Helper to safely get property from PSCustomObject
+  $getProp = { param($obj, $name, $default)
+    if ($null -ne $obj.PSObject -and $obj.PSObject.Properties.Name -contains $name) {
+      $val = $obj.$name
+      if ($null -ne $val) { return $val }
+    }
+    return $default
+  }
+  
   # Extract common claims
-  $alg = $header.alg ?? 'N/A'
-  $typ = $header.typ ?? 'N/A'
-  $iss = $payload.iss ?? 'N/A'
-  $sub = $payload.sub ?? 'N/A'
-  $aud = if ($payload.aud) { if ($payload.aud -is [array]) { $payload.aud -join ', ' } else { $payload.aud } } else { 'N/A' }
+  $alg = & $getProp $header 'alg' 'N/A'
+  $typ = & $getProp $header 'typ' 'N/A'
+  $iss = & $getProp $payload 'iss' 'N/A'
+  $sub = & $getProp $payload 'sub' 'N/A'
+  $audVal = & $getProp $payload 'aud' $null
+  $aud = if ($null -ne $audVal) { if ($audVal -is [array]) { $audVal -join ', ' } else { $audVal } } else { 'N/A' }
   $exp = 'N/A'; $expDate = 'N/A'
-  if ($payload.exp) {
-    $exp = $payload.exp
-    $expDate = [DateTimeOffset]::FromUnixTimeSeconds($payload.exp).DateTime.ToString('yyyy-MM-dd HH:mm:ss UTC')
+  $expVal = & $getProp $payload 'exp' $null
+  if ($null -ne $expVal) {
+    $exp = $expVal
+    $expDate = [DateTimeOffset]::FromUnixTimeSeconds($expVal).DateTime.ToString('yyyy-MM-dd HH:mm:ss UTC')
   }
   $iat = 'N/A'; $iatDate = 'N/A'
-  if ($payload.iat) {
-    $iat = $payload.iat
-    $iatDate = [DateTimeOffset]::FromUnixTimeSeconds($payload.iat).DateTime.ToString('yyyy-MM-dd HH:mm:ss UTC')
+  $iatVal = & $getProp $payload 'iat' $null
+  if ($null -ne $iatVal) {
+    $iat = $iatVal
+    $iatDate = [DateTimeOffset]::FromUnixTimeSeconds($iatVal).DateTime.ToString('yyyy-MM-dd HH:mm:ss UTC')
   }
   
   $isExpired = $false
-  if ($payload.exp) { $isExpired = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -gt $payload.exp }
+  if ($null -ne $expVal) { $isExpired = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -gt $expVal }
   
   Write-XYProgress 0.95 'Finalizing...'
   
@@ -275,27 +287,33 @@ function Invoke-PingTest {
     Write-XYProgress (0.2 + (0.6 * $i / $count)) "Ping $i of $count..."
     try {
       $reply = $pinger.Send($host_, $timeout)
-      if ($reply.Status -eq 'Success') {
+      if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
         $successful++
         $latencies.Add($reply.RoundtripTime)
-        $results.Add([pscustomobject]@{ seq=$i; status='Success'; time="$($reply.RoundtripTime)ms"; ttl=$reply.Options.Ttl; address=$reply.Address.ToString() })
+        $ttlVal = if ($null -ne $reply.Options) { $reply.Options.Ttl } else { '-' }
+        $addrVal = if ($null -ne $reply.Address) { $reply.Address.ToString() } else { '-' }
+        $results.Add([pscustomobject]@{ seq=$i; status='Success'; time="$($reply.RoundtripTime)ms"; ttl=$ttlVal; address=$addrVal })
       } else {
         $failed++
-        $results.Add([pscustomobject]@{ seq=$i; status=$reply.Status.ToString(); time='-'; ttl='-'; address='-' })
+        $statusStr = $reply.Status.ToString()
+        $results.Add([pscustomobject]@{ seq=$i; status=$statusStr; time='-'; ttl='-'; address='-' })
       }
     } catch {
       $failed++
-      $results.Add([pscustomobject]@{ seq=$i; status='Error'; time='-'; ttl='-'; address='-' })
+      $errMsg = $_.Exception.Message
+      # Truncate long error messages
+      if ($errMsg.Length -gt 50) { $errMsg = $errMsg.Substring(0, 47) + '...' }
+      $results.Add([pscustomobject]@{ seq=$i; status="Error: $errMsg"; time='-'; ttl='-'; address='-' })
     }
-    if ($i -lt $count) { Start-Sleep -Milliseconds 100 }
+    if ($i -lt $count) { Start-Sleep -Milliseconds 200 }
   }
   $pinger.Dispose()
   
   Write-XYProgress 0.9 'Calculating statistics...'
   
-  $minLatency = if ($latencies.Count -gt 0) { ($latencies | Measure-Object -Minimum).Minimum } else { 0 }
-  $maxLatency = if ($latencies.Count -gt 0) { ($latencies | Measure-Object -Maximum).Maximum } else { 0 }
-  $avgLatency = if ($latencies.Count -gt 0) { [Math]::Round(($latencies | Measure-Object -Average).Average, 2) } else { 0 }
+  $minLatency = if ($latencies.Count -gt 0) { ($latencies | Measure-Object -Minimum).Minimum } else { '-' }
+  $maxLatency = if ($latencies.Count -gt 0) { ($latencies | Measure-Object -Maximum).Maximum } else { '-' }
+  $avgLatency = if ($latencies.Count -gt 0) { [Math]::Round(($latencies | Measure-Object -Average).Average, 2) } else { '-' }
   $lossPercent = [Math]::Round(($failed / $count) * 100, 1)
   
   # Resolve hostname
@@ -304,8 +322,13 @@ function Invoke-PingTest {
   
   Write-XYProgress 0.95 'Finalizing...'
   
-  $rows = $results | ForEach-Object { @($_.seq, $_.status, $_.time, $_.ttl, $_.address) }
-  Write-XY @{ table = @{ title="Ping Results - $host_"; header=@('Seq','Status','Time','TTL','Address'); rows=$rows; caption="$successful/$count successful, $lossPercent% loss" } }
+  # Build rows - each row must be an array wrapped with , to prevent flattening
+  $rows = @()
+  foreach ($r in $results) {
+    $rows += ,@($r.seq, $r.status, $r.time, $r.ttl, $r.address)
+  }
+  $resultCaption = if ($successful -eq $count) { "All $count pings successful" } elseif ($successful -eq 0) { "All $count pings failed" } else { "$successful/$count successful, $lossPercent% loss" }
+  Write-XY @{ table = @{ title="Ping Results - $host_"; header=@('Seq','Status','Time','TTL','Address'); rows=$rows; caption=$resultCaption } }
   
   $statsRows = @(
     @('Host', $host_),
@@ -313,14 +336,27 @@ function Invoke-PingTest {
     @('Packets Sent', $count),
     @('Packets Received', $successful),
     @('Packets Lost', $failed),
-    @('Loss Percentage', "$lossPercent%"),
-    @('Min Latency', "${minLatency}ms"),
-    @('Max Latency', "${maxLatency}ms"),
-    @('Avg Latency', "${avgLatency}ms")
+    @('Loss Percentage', "$lossPercent%")
   )
+  # Only show latency stats if we have successful pings
+  if ($latencies.Count -gt 0) {
+    $statsRows += @(@('Min Latency', "${minLatency}ms"), @('Max Latency', "${maxLatency}ms"), @('Avg Latency', "${avgLatency}ms"))
+  }
   Write-XY @{ table = @{ title='Statistics'; header=@('Metric','Value'); rows=$statsRows; caption='' } }
   
-  [pscustomobject]@{ tool='Ping Test'; host=$host_; resolvedIP=$resolvedIP; count=$count; successful=$successful; failed=$failed; lossPercent=$lossPercent; minLatency=$minLatency; maxLatency=$maxLatency; avgLatency=$avgLatency; results=$results.ToArray() }
+  # If all pings failed, throw an error so job shows as failed
+  if ($successful -eq 0) {
+    # Get the first error message for context
+    $firstError = ($results | Select-Object -First 1).status
+    throw "Ping failed: All $count pings to $host_ failed. Status: $firstError"
+  }
+  
+  # Return appropriate latency values for JSON
+  $minLatencyOut = if ($latencies.Count -gt 0) { $minLatency } else { $null }
+  $maxLatencyOut = if ($latencies.Count -gt 0) { $maxLatency } else { $null }
+  $avgLatencyOut = if ($latencies.Count -gt 0) { $avgLatency } else { $null }
+  
+  [pscustomobject]@{ tool='Ping Test'; host=$host_; resolvedIP=$resolvedIP; count=$count; successful=$successful; failed=$failed; lossPercent=$lossPercent; minLatency=$minLatencyOut; maxLatency=$maxLatencyOut; avgLatency=$avgLatencyOut; results=$results.ToArray() }
 }
 
 # ------------------------- DNS Lookup -------------------------
@@ -423,7 +459,11 @@ function Invoke-DnsLookup {
   
   Write-XYProgress 0.95 'Finalizing...'
   
-  $rows = $results | ForEach-Object { @($_.type, $_.name, $_.value, $_.ttl) }
+  # Build rows - each row must be an array wrapped with , to prevent flattening
+  $rows = @()
+  foreach ($r in $results) {
+    $rows += ,@($r.type, $r.name, $r.value, $r.ttl)
+  }
   Write-XY @{ table = @{ title="DNS Lookup - $recordType"; header=@('Type','Name','Value','TTL'); rows=$rows; caption=$(if ($dnsServer) { "Using DNS server: $dnsServer" } else { 'Using system DNS' }) } }
   
   [pscustomobject]@{ tool='DNS Lookup'; query=$query; recordType=$recordType; dnsServer=$(if ($dnsServer) { $dnsServer } else { 'system' }); success=$success; results=$results.ToArray(); error=$errorMsg }
@@ -501,7 +541,11 @@ function Invoke-Traceroute {
   
   Write-XYProgress 0.95 'Finalizing...'
   
-  $rows = $results | ForEach-Object { @($_.hop, $_.ip, $_.hostname, $_.time) }
+  # Build rows - each row must be an array wrapped with , to prevent flattening
+  $rows = @()
+  foreach ($r in $results) {
+    $rows += ,@($r.hop, $r.ip, $r.hostname, $r.time)
+  }
   Write-XY @{ table = @{ title="Traceroute - $host_"; header=@('Hop','IP Address','Hostname','Time'); rows=$rows; caption=$(if ($reached) { "Destination reached in $($results.Count) hops" } else { "Destination not reached within $maxHops hops" }) } }
   
   [pscustomobject]@{ tool='Traceroute'; host=$host_; destinationIP=$destIP; maxHops=$maxHops; hopsUsed=$results.Count; reached=$reached; results=$results.ToArray() }
@@ -582,7 +626,11 @@ function Invoke-PortScanner {
   
   Write-XYProgress 0.95 'Finalizing...'
   
-  $rows = $results | ForEach-Object { @($_.port, $_.status, $_.service) }
+  # Build rows - each row must be an array wrapped with , to prevent flattening
+  $rows = @()
+  foreach ($r in $results) {
+    $rows += ,@($r.port, $r.status, $r.service)
+  }
   Write-XY @{ table = @{ title="Port Scan - $host_"; header=@('Port','Status','Service'); rows=$rows; caption="$openPorts open, $closedPorts closed" } }
   
   [pscustomobject]@{ tool='Port Scanner'; host=$host_; portsScanned=$ports.Count; openPorts=$openPorts; closedPorts=$closedPorts; timeout=$timeout; results=$results.ToArray() }
@@ -678,9 +726,10 @@ function Invoke-HttpChecker {
   Write-XY @{ table = @{ title='HTTP Response'; header=@('Property','Value'); rows=$summaryRows; caption=$(if ($success) { 'Request completed' } else { 'Request failed' }) } }
   
   if ($success -and $headers.Count -gt 0) {
-    $headerRows = $headers.GetEnumerator() | Sort-Object Key | ForEach-Object {
-      $val = if ($_.Value.Length -gt 60) { $_.Value.Substring(0, 60) + '...' } else { $_.Value }
-      @($_.Key, $val)
+    $headerRows = @()
+    foreach ($h in ($headers.GetEnumerator() | Sort-Object Key)) {
+      $val = if ($h.Value.Length -gt 60) { $h.Value.Substring(0, 60) + '...' } else { $h.Value }
+      $headerRows += ,@($h.Key, $val)
     }
     Write-XY @{ table = @{ title='Response Headers'; header=@('Header','Value'); rows=$headerRows; caption='' } }
   }
@@ -789,10 +838,11 @@ function Invoke-SslChecker {
     }
     
     if ($chain -and $chain.ChainElements.Count -gt 1) {
-      $chainRows = for ($i = 0; $i -lt $chain.ChainElements.Count; $i++) {
+      $chainRows = @()
+      for ($i = 0; $i -lt $chain.ChainElements.Count; $i++) {
         $elem = $chain.ChainElements[$i].Certificate
         $elemCn = ''; if ($elem.Subject -match 'CN=([^,]+)') { $elemCn = $Matches[1] }
-        @($i, $elemCn, $elem.NotAfter.ToString('yyyy-MM-dd'))
+        $chainRows += ,@($i, $elemCn, $elem.NotAfter.ToString('yyyy-MM-dd'))
       }
       Write-XY @{ table = @{ title='Certificate Chain'; header=@('Level','Common Name','Expires'); rows=$chainRows; caption='' } }
     }
@@ -903,7 +953,8 @@ function Invoke-WhoisLookup {
   Write-XYProgress 0.95 'Finalizing...'
   
   if ($success) {
-    $summaryRows = @(@('Domain', $domain))
+    $summaryRows = @()
+    $summaryRows += ,@('Domain', $domain)
     foreach ($key in @('Registrar', 'Creation Date', 'Expiration Date', 'Updated Date', 'Status', 'Name Servers')) {
       if ($whoisData.ContainsKey($key)) {
         $val = $whoisData[$key]
